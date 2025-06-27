@@ -70,8 +70,11 @@ PoseLib use [COLMAP](https://colmap.github.io/cameras.html)-compatible camera mo
 * RADIAL
 * OPENCV
 * OPENCV_FISHEYE
+* EQUIRECTANGULAR
 
 but it is relatively straight-forward to add other models. If you do so please consider opening a pull-request. In contrast to COLMAP, we require analytical jacobians for the distortion mappings which make it a bit more work to port them.
+
+The `EQUIRECTANGULAR` camera model is designed for 360-degree panoramic images using equirectangular projection. It takes two parameters: `[width, height]` representing the image dimensions. This model maps between normalized image coordinates and pixel coordinates using spherical projection mathematics.
 
 The `Camera` struct currently contains `width`/`height` fields, however these are not used anywhere in the code-base and are provided simply to be consistent with COLMAP. The `Camera` class also provides the helper function `initialize_from_txt(str)` which initializes the camera from a line given by the `cameras.txt` file of a COLMAP reconstruction. 
 
