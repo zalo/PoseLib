@@ -28,9 +28,14 @@
 
 #include "colmap_models.h"
 
+#include <cmath>
 #include <iomanip>
 #include <limits>
 #include <sstream>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 namespace poselib {
 
@@ -780,6 +785,102 @@ void OpenCVFisheyeCameraModel::unproject(const std::vector<double> &params, cons
 }
 const std::vector<size_t> OpenCVFisheyeCameraModel::focal_idx = {0, 1};
 const std::vector<size_t> OpenCVFisheyeCameraModel::principal_point_idx = {2, 3};
+
+///////////////////////////////////////////////////////////////////
+// Equirectangular camera (panoramic)
+// params = width, height (image dimensions)
+
+void EquirectangularCameraModel::project(const std::vector<double> &params, const Eigen::Vector2d &x,
+                                         Eigen::Vector2d *xp) {
+    const double width = params[0];
+    const double height = params[1];
+
+    // Convert normalized coordinates to 3D direction
+    const double norm = std::sqrt(x(0) * x(0) + x(1) * x(1) + 1.0);
+    const double x_norm = x(0) / norm;
+    const double y_norm = x(1) / norm;
+    const double z_norm = 1.0 / norm;
+
+    // Convert to spherical coordinates
+    const double theta = std::asin(y_norm);        // elevation angle [-π/2, π/2]
+    const double phi = std::atan2(x_norm, z_norm); // azimuth angle [-π, π]
+
+    // Map to equirectangular pixel coordinates
+    (*xp)(0) = (phi + M_PI) * width / (2.0 * M_PI);  // u coordinate
+    (*xp)(1) = (M_PI / 2.0 - theta) * height / M_PI; // v coordinate
+}
+
+void EquirectangularCameraModel::project_with_jac(const std::vector<double> &params, const Eigen::Vector2d &x,
+                                                  Eigen::Vector2d *xp, Eigen::Matrix2d *jac) {
+    const double width = params[0];
+    const double height = params[1];
+
+    // Convert normalized coordinates to 3D direction
+    const double x2 = x(0) * x(0);
+    const double y2 = x(1) * x(1);
+    const double norm = std::sqrt(x2 + y2 + 1.0);
+    const double x_norm = x(0) / norm;
+    const double y_norm = x(1) / norm;
+    const double z_norm = 1.0 / norm;
+
+    // Convert to spherical coordinates
+    const double theta = std::asin(y_norm);        // elevation angle
+    const double phi = std::atan2(x_norm, z_norm); // azimuth angle
+
+    // Projection
+    (*xp)(0) = (phi + M_PI) * width / (2.0 * M_PI);
+    (*xp)(1) = (M_PI / 2.0 - theta) * height / M_PI;
+
+    // Compute Jacobian
+    const double norm3 = norm * norm * norm;
+
+    // Derivatives of normalized coordinates
+    const double dx_norm_dx = (y2 + 1.0) / norm3;
+    const double dx_norm_dy = -x(0) * x(1) / norm3;
+    const double dy_norm_dx = -x(0) * x(1) / norm3;
+    const double dy_norm_dy = (x2 + 1.0) / norm3;
+    const double dz_norm_dx = -x(0) / norm3;
+    const double dz_norm_dy = -x(1) / norm3;
+
+    // Derivatives of theta = asin(y_norm)
+    const double cos_theta = std::sqrt(1.0 - y_norm * y_norm);
+    const double dtheta_dx = dy_norm_dx / cos_theta;
+    const double dtheta_dy = dy_norm_dy / cos_theta;
+
+    // Derivatives of phi = atan2(x_norm, z_norm)
+    const double denom_phi = x_norm * x_norm + z_norm * z_norm;
+    const double dphi_dx = (z_norm * dx_norm_dx - x_norm * dz_norm_dx) / denom_phi;
+    const double dphi_dy = (z_norm * dx_norm_dy - x_norm * dz_norm_dy) / denom_phi;
+
+    // Chain rule for final pixel coordinates
+    (*jac)(0, 0) = dphi_dx * width / (2.0 * M_PI);
+    (*jac)(0, 1) = dphi_dy * width / (2.0 * M_PI);
+    (*jac)(1, 0) = -dtheta_dx * height / M_PI;
+    (*jac)(1, 1) = -dtheta_dy * height / M_PI;
+}
+
+void EquirectangularCameraModel::unproject(const std::vector<double> &params, const Eigen::Vector2d &xp,
+                                           Eigen::Vector2d *x) {
+    const double width = params[0];
+    const double height = params[1];
+
+    // Convert pixel coordinates to spherical coordinates
+    const double phi = xp(0) * 2.0 * M_PI / width - M_PI;    // azimuth [-π, π]
+    const double theta = M_PI / 2.0 - xp(1) * M_PI / height; // elevation [-π/2, π/2]
+
+    // Convert spherical to 3D direction
+    const double cos_theta = std::cos(theta);
+    const double x_3d = std::sin(phi) * cos_theta;
+    const double y_3d = std::sin(theta);
+    const double z_3d = std::cos(phi) * cos_theta;
+
+    // Project to normalized coordinates (x/z, y/z)
+    (*x)(0) = x_3d / z_3d;
+    (*x)(1) = y_3d / z_3d;
+}
+
+const std::vector<size_t> EquirectangularCameraModel::focal_idx = {0}; // width as focal length equivalent
+const std::vector<size_t> EquirectangularCameraModel::principal_point_idx = {};
 
 ///////////////////////////////////////////////////////////////////
 // Null camera - this is used as a dummy value in various places
